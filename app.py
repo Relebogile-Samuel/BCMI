@@ -10,6 +10,9 @@ app.config['SECRET_KEY'] = 'your-secret-key'  # Replace with a secure key
 app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # Limit file size to 100MB
 ALLOWED_EXTENSIONS = {'jpg', 'jpeg', 'png', 'mp4', 'webm'}
 
+# *** UPDATED: Set database path for Vercel ***
+DB_PATH = '/tmp/database.db'
+
 # Ensure upload folder exists
 if not os.path.exists(app.config['UPLOAD_FOLDER']):
     os.makedirs(app.config['UPLOAD_FOLDER'])
@@ -17,7 +20,8 @@ if not os.path.exists(app.config['UPLOAD_FOLDER']):
 # Database setup
 def init_db():
     try:
-        with sqlite3.connect('database.db') as conn:
+        # *** UPDATED: Use the DB_PATH variable ***
+        with sqlite3.connect(DB_PATH) as conn:
             # Original media table
             conn.execute('''
                 CREATE TABLE IF NOT EXISTS media (
@@ -29,7 +33,7 @@ def init_db():
                 )
             ''')
             
-            # *** NEW: Table to store reactions (likes) ***
+            # Table to store reactions (likes)
             conn.execute('''
                 CREATE TABLE IF NOT EXISTS reactions (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -48,6 +52,7 @@ def allowed_file(filename):
 
 @app.route('/')
 def index():
+    init_db() # Ensure DB is created on Vercel's cold start
     return render_template('index.html')
 
 @app.route('/upload', methods=['GET', 'POST'])
@@ -74,23 +79,18 @@ def upload_media():
             file_ext = filename.rsplit('.', 1)[1].lower()
             media_type = 'image' if file_ext in {'jpg', 'jpeg', 'png'} else 'video'
 
-            with sqlite3.connect('database.db') as conn:
+            # *** UPDATED: Use the DB_PATH variable ***
+            with sqlite3.connect(DB_PATH) as conn:
                 cursor = conn.cursor()
-                # Insert into media table
                 cursor.execute(
                     'INSERT INTO media (title, type, filename, upload_date) VALUES (?, ?, ?, ?)',
                     (title, media_type, unique_filename, datetime.now().strftime('%Y-%m-%d'))
                 )
-                
-                # *** NEW: Get the ID of the media we just inserted ***
                 new_media_id = cursor.lastrowid
-                
-                # *** NEW: Create a corresponding entry in the reactions table ***
                 cursor.execute(
                     'INSERT INTO reactions (media_id, likes) VALUES (?, 0)',
                     (new_media_id,)
                 )
-                
                 conn.commit()
 
             flash('Media uploaded successfully!', 'success')
@@ -105,12 +105,8 @@ def upload_media():
 @app.route('/media')
 def media():
     try:
-        with sqlite3.connect('database.db') as conn:
-            conn.row_factory = sqlite3.Row # Helps fetch data by column name, but we'll stick to index for consistency
-            
-            # *** MODIFIED: SQL query to JOIN media and reactions tables ***
-            # This fetches all media items AND their like counts
-            # COALESCE(r.likes, 0) ensures we get 0 likes if no entry exists
+        # *** UPDATED: Use the DB_PATH variable ***
+        with sqlite3.connect(DB_PATH) as conn:
             sql_query = '''
                 SELECT m.id, m.title, m.type, m.filename, m.upload_date, COALESCE(r.likes, 0) as likes
                 FROM media m
@@ -125,30 +121,23 @@ def media():
         flash(f'Error fetching media: {str(e)}', 'error')
         return render_template('media.html', media_items=[])
 
-# *** NEW: Route to handle the "like" button click ***
 @app.route('/react/like/<int:media_id>', methods=['POST'])
 def like_media(media_id):
     try:
-        with sqlite3.connect('database.db') as conn:
+        # *** UPDATED: Use the DB_PATH variable ***
+        with sqlite3.connect(DB_PATH) as conn:
             cursor = conn.cursor()
-            
-            # Increment the like count for the given media_id
             cursor.execute(
                 'UPDATE reactions SET likes = likes + 1 WHERE media_id = ?',
                 (media_id,)
             )
-            
-            # Fetch the new like count to send back
             cursor.execute(
                 'SELECT likes FROM reactions WHERE media_id = ?',
                 (media_id,)
             )
             result = cursor.fetchone()
             new_like_count = result[0] if result else 0
-            
             conn.commit()
-            
-            # Return the new count as JSON
             return jsonify({'likes': new_like_count})
             
     except sqlite3.Error as e:
@@ -165,11 +154,9 @@ def download(filename):
 
 @app.route('/delete/<int:id>')
 def delete(id):
-    # This route still exists, but the button is gone from the public page.
-    # You could secure this later (e.g., require a password)
-    # For now, it's just hidden.
     try:
-        with sqlite3.connect('database.db') as conn:
+        # *** UPDATED: Use the DB_PATH variable ***
+        with sqlite3.connect(DB_PATH) as conn:
             cursor = conn.execute('SELECT filename FROM media WHERE id = ?', (id,))
             result = cursor.fetchone()
             if not result:
@@ -178,7 +165,6 @@ def delete(id):
 
             filename = result[0]
             conn.execute('DELETE FROM media WHERE id = ?', (id,))
-            # *** NEW: Also delete the reactions entry ***
             conn.execute('DELETE FROM reactions WHERE media_id = ?', (id,))
             conn.commit()
 
@@ -193,6 +179,8 @@ def delete(id):
         flash(f'Error deleting media: {str(e)}', 'error')
         return redirect(url_for('media'))
 
+# The if __name__ == '__main__': block is not needed for Vercel,
+# but it's fine to leave it for local testing.
 if __name__ == '__main__':
     init_db()
     app.run(debug=True)
