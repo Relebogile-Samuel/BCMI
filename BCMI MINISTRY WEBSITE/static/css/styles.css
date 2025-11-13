@@ -1,0 +1,23 @@
+/* Import futuristic font */
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap');
+
+html {
+    scroll-behavior: smooth;
+}
+
+body {
+    font-family: 'Space Grotesk', sans-serif;
+}
+
+nav a.active {
+    @apply text-blue-400 font-bold;
+}
+
+button:focus, input:focus, textarea:focus {
+    outline: none;
+}
+
+/* Custom glow effect */
+.glow-button {
+    @apply shadow-lg shadow-blue-500/50 hover:shadow-blue-400/60;
+}
